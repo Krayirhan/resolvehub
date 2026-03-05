@@ -1,0 +1,67 @@
+server:
+  port: ${PORT:8080}
+
+spring:
+  application:
+    name: resolvehub
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/resolvehub}
+    username: ${DB_USER:resolvehub}
+    password: ${DB_PASSWORD:resolvehub}
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
+    properties:
+      hibernate:
+        format_sql: false
+  flyway:
+    enabled: true
+    baseline-on-migrate: true
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus
+  endpoint:
+    health:
+      show-details: always
+
+springdoc:
+  swagger-ui:
+    path: /swagger-ui
+
+logging:
+  pattern:
+    console: "%d{yyyy-MM-dd'T'HH:mm:ss.SSSXXX} %-5level [%X{correlationId}] %logger{36} - %msg%n"
+
+resolvehub:
+  jwt:
+    secret: ${JWT_SECRET:resolvehub-default-secret-key-resolvehub-default-secret-key}
+    issuer: ${JWT_ISSUER:resolvehub}
+    access-token-minutes: ${JWT_ACCESS_MINUTES:30}
+    refresh-token-days: ${JWT_REFRESH_DAYS:30}
+  rate-limit:
+    requests-per-minute: ${RATE_LIMIT_RPM:120}
+  ai:
+    enabled: ${AI_ENABLED:false}
+    base-url: ${AI_BASE_URL:}
+    api-key: ${AI_API_KEY:}
+    model: ${AI_MODEL:gpt-4o-mini}
+    embedding-model: ${EMBEDDING_MODEL:text-embedding-3-small}
+    embedding-dim: ${EMBEDDING_DIM:1536}
+    worker-delay-ms: ${AI_WORKER_DELAY_MS:15000}
+  storage:
+    endpoint: ${MINIO_ENDPOINT:http://localhost:9000}
+    access-key: ${MINIO_ACCESS_KEY:minio}
+    secret-key: ${MINIO_SECRET_KEY:minio123}
+    bucket: ${MINIO_BUCKET:resolvehub}
+  search:
+    endpoint: ${OPENSEARCH_URL:http://localhost:9200}
+  seed:
+    admin-password: ${SEED_ADMIN_PASSWORD:Admin123!}
