@@ -32,8 +32,6 @@ public record RecommendedResponse(
 
     public record RankingBreakdown(
             double totalScore,
-            double vectorSimilarity,
-            double keywordScore,
             double successRateContext,
             double recencyDecay,
             double authorExpertise,

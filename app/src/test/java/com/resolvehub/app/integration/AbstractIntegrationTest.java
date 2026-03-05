@@ -3,9 +3,11 @@ package com.resolvehub.app.integration;
 import io.restassured.RestAssured;
 import io.restassured.http.ContentType;
 import io.restassured.response.Response;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.junit.jupiter.api.BeforeEach;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.server.LocalServerPort;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.testcontainers.containers.PostgreSQLContainer;
@@ -29,6 +31,9 @@ public abstract class AbstractIntegrationTest {
     @LocalServerPort
     int port;
 
+    @Autowired
+    protected JdbcTemplate jdbcTemplate;
+
     @DynamicPropertySource
     static void properties(DynamicPropertyRegistry registry) {
         registry.add("spring.datasource.url", postgres::getJdbcUrl);
@@ -36,6 +41,7 @@ public abstract class AbstractIntegrationTest {
         registry.add("spring.datasource.password", postgres::getPassword);
         registry.add("spring.flyway.enabled", () -> true);
         registry.add("resolvehub.ai.enabled", () -> false);
+        registry.add("resolvehub.ai.worker-delay-ms", () -> 600000);
         registry.add("resolvehub.storage.endpoint", () -> "");
         registry.add("resolvehub.search.endpoint", () -> "http://localhost:9200");
     }
@@ -46,14 +52,18 @@ public abstract class AbstractIntegrationTest {
         RestAssured.basePath = "/api/v1";
     }
 
-    protected String registerAndGetAccessToken() {
+    protected AuthTokens registerUser() {
         String suffix = UUID.randomUUID().toString().substring(0, 8);
+        return registerUser("user-" + suffix + "@test.local", "user_" + suffix, "Password123!");
+    }
+
+    protected AuthTokens registerUser(String email, String username, String password) {
         Response response = given()
                 .contentType(ContentType.JSON)
                 .body(Map.of(
-                        "email", "user-" + suffix + "@test.local",
-                        "username", "user_" + suffix,
-                        "password", "Password123!"
+                        "email", email,
+                        "username", username,
+                        "password", password
                 ))
                 .when()
                 .post("/auth/register")
@@ -61,7 +71,65 @@ public abstract class AbstractIntegrationTest {
                 .statusCode(201)
                 .extract()
                 .response();
-        return response.path("accessToken");
+        return new AuthTokens(
+                response.path("accessToken"),
+                response.path("refreshToken"),
+                response.path("user.id"),
+                response.path("user.email"),
+                response.path("user.username")
+        );
+    }
+
+    protected AuthTokens login(String email, String password) {
+        Response response = given()
+                .contentType(ContentType.JSON)
+                .body(Map.of("email", email, "password", password))
+                .when()
+                .post("/auth/login")
+                .then()
+                .statusCode(200)
+                .extract()
+                .response();
+        return new AuthTokens(
+                response.path("accessToken"),
+                response.path("refreshToken"),
+                response.path("user.id"),
+                response.path("user.email"),
+                response.path("user.username")
+        );
+    }
+
+    protected AuthTokens refresh(String refreshToken) {
+        Response response = given()
+                .contentType(ContentType.JSON)
+                .body(Map.of("refreshToken", refreshToken))
+                .when()
+                .post("/auth/refresh")
+                .then()
+                .statusCode(200)
+                .extract()
+                .response();
+        return new AuthTokens(
+                response.path("accessToken"),
+                response.path("refreshToken"),
+                response.path("user.id"),
+                response.path("user.email"),
+                response.path("user.username")
+        );
+    }
+
+    protected void logout(String refreshToken) {
+        given()
+                .contentType(ContentType.JSON)
+                .body(Map.of("refreshToken", refreshToken))
+                .when()
+                .post("/auth/logout")
+                .then()
+                .statusCode(204);
+    }
+
+    protected String registerAndGetAccessToken() {
+        return registerUser().accessToken();
     }
 
     protected Long createProblem(String token, Map<String, String> environment) {
@@ -101,5 +169,14 @@ public abstract class AbstractIntegrationTest {
                 .extract()
                 .response();
         return response.path("id");
+    }
+
+    protected record AuthTokens(
+            String accessToken,
+            String refreshToken,
+            Long userId,
+            String email,
+            String username
+    ) {
     }
 }

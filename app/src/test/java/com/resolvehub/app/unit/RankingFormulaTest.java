@@ -10,15 +10,15 @@ class RankingFormulaTest {
 
     @Test
     void shouldPrioritizeSuccessRateContextStrongly() {
-        double highContext = rankingFormula.score(0.5, 0.5, 1.0, 0.5, 0.5);
-        double lowContext = rankingFormula.score(0.5, 0.5, 0.0, 0.5, 0.5);
+        double highContext = rankingFormula.score(1.0, 0.5, 0.5);
+        double lowContext = rankingFormula.score(0.0, 0.5, 0.5);
         assertTrue(highContext > lowContext);
     }
 
     @Test
     void shouldProduceHigherScoreForGenerallyBetterCandidate() {
-        double strong = rankingFormula.score(0.8, 0.7, 0.9, 0.9, 0.8);
-        double weak = rankingFormula.score(0.3, 0.2, 0.1, 0.3, 0.2);
+        double strong = rankingFormula.score(0.9, 0.9, 0.8);
+        double weak = rankingFormula.score(0.1, 0.3, 0.2);
         assertTrue(strong > weak);
     }
 }

@@ -2,9 +2,7 @@ package com.resolvehub.playbook.service;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.resolvehub.aiorchestrator.service.QualityGateService;
 import com.resolvehub.common.exception.NotFoundException;
-import com.resolvehub.common.model.OutcomeType;
 import com.resolvehub.common.util.EnvironmentFingerprintUtil;
 import com.resolvehub.playbook.domain.PlaybookEntity;
 import com.resolvehub.playbook.domain.PlaybookStatus;
@@ -30,7 +28,6 @@ public class RecommendationService {
     private final SolutionRepository solutionRepository;
     private final SolutionOutcomeRepository solutionOutcomeRepository;
     private final PlaybookRepository playbookRepository;
-    private final QualityGateService qualityGateService;
     private final ObjectMapper objectMapper;
     private final RankingFormula rankingFormula;
 
@@ -39,7 +36,6 @@ public class RecommendationService {
             SolutionRepository solutionRepository,
             SolutionOutcomeRepository solutionOutcomeRepository,
             PlaybookRepository playbookRepository,
-            QualityGateService qualityGateService,
             ObjectMapper objectMapper,
             RankingFormula rankingFormula
     ) {
@@ -47,7 +43,6 @@ public class RecommendationService {
         this.solutionRepository = solutionRepository;
         this.solutionOutcomeRepository = solutionOutcomeRepository;
         this.playbookRepository = playbookRepository;
-        this.qualityGateService = qualityGateService;
         this.objectMapper = objectMapper;
         this.rankingFormula = rankingFormula;
     }
@@ -58,11 +53,8 @@ public class RecommendationService {
                 .orElseThrow(() -> new NotFoundException("Problem not found"));
         String envFingerprint = fingerprint(currentProblem.getEnvironmentJson());
 
-        String problemText = currentProblem.getTitle() + "\n" + currentProblem.getDescription();
-        List<Double> problemEmbedding = qualityGateService.embeddingFor(problemText);
-
         List<RecommendedResponse.RecommendedSolutionCard> topSolutions = solutionRepository.findByProblemIdOrderByCreatedAtDesc(problemId).stream()
-                .map(solution -> scoreSolution(solution, problemText, problemEmbedding, envFingerprint))
+                .map(solution -> scoreSolution(solution, envFingerprint))
                 .sorted(Comparator.comparingDouble(c -> -c.ranking().totalScore()))
                 .limit(10)
                 .toList();
@@ -82,7 +74,7 @@ public class RecommendationService {
 
         List<RecommendedResponse.SimilarProblemCard> similarProblems = problemRepository.findAll().stream()
                 .filter(problem -> !Objects.equals(problem.getId(), problemId))
-                .map(problem -> scoreSimilarProblem(problem, problemText))
+                .map(problem -> scoreSimilarProblem(problem, currentProblem))
                 .sorted(Comparator.comparingDouble(RecommendedResponse.SimilarProblemCard::score).reversed())
                 .limit(5)
                 .toList();
@@ -92,22 +84,13 @@ public class RecommendationService {
 
     private RecommendedResponse.RecommendedSolutionCard scoreSolution(
             SolutionEntity solution,
-            String problemText,
-            List<Double> problemEmbedding,
             String environmentFingerprint
     ) {
-        String solutionText = solution.getSummary() + "\n" + solution.getStepsMarkdown();
-        List<Double> solutionEmbedding = qualityGateService.embeddingFor(solutionText);
-
-        double vectorSimilarity = cosine(problemEmbedding, solutionEmbedding);
-        double keywordScore = keywordSimilarity(problemText, solutionText);
         double successRateContext = successRateForSolution(solution.getId(), environmentFingerprint);
         double recencyDecay = recencyScore(solution.getCreatedAt());
         double authorExpertise = authorExpertise(solution.getAuthorId());
 
         double total = rankingFormula.score(
-                vectorSimilarity,
-                keywordScore,
                 successRateContext,
                 recencyDecay,
                 authorExpertise
@@ -115,12 +98,10 @@ public class RecommendationService {
 
         RecommendedResponse.RankingBreakdown breakdown = new RecommendedResponse.RankingBreakdown(
                 round(total),
-                round(vectorSimilarity),
-                round(keywordScore),
                 round(successRateContext),
                 round(recencyDecay),
                 round(authorExpertise),
-                "w1*vector + w2*keyword + w3*context success + w4*recency + w5*author expertise"
+                "score = 0.55*successRateContext + 0.20*recencyDecay + 0.25*authorExpertise"
         );
         return new RecommendedResponse.RecommendedSolutionCard(solution.getId(), solution.getSummary(), breakdown);
     }
@@ -141,13 +122,16 @@ public class RecommendationService {
         );
     }
 
-    private RecommendedResponse.SimilarProblemCard scoreSimilarProblem(ProblemEntity candidate, String currentProblemText) {
-        double score = keywordSimilarity(currentProblemText, candidate.getTitle() + "\n" + candidate.getDescription());
+    private RecommendedResponse.SimilarProblemCard scoreSimilarProblem(ProblemEntity candidate, ProblemEntity currentProblem) {
+        double score = keywordSimilarity(
+                currentProblem.getTitle() + "\n" + currentProblem.getDescription(),
+                candidate.getTitle() + "\n" + candidate.getDescription()
+        );
         return new RecommendedResponse.SimilarProblemCard(
                 candidate.getId(),
                 candidate.getTitle(),
                 round(score),
-                "keyword overlap against current problem"
+                "stubbed keyword overlap against current problem"
         );
     }
 
@@ -189,27 +173,6 @@ public class RecommendationService {
     private double recencyScore(Instant createdAt) {
         long days = Math.max(0, Duration.between(createdAt, Instant.now()).toDays());
         return Math.exp(-days / 90.0);
-    }
-
-    private double cosine(List<Double> a, List<Double> b) {
-        int limit = Math.min(a.size(), b.size());
-        if (limit == 0) {
-            return 0.0;
-        }
-        double dot = 0.0;
-        double normA = 0.0;
-        double normB = 0.0;
-        for (int i = 0; i < limit; i++) {
-            double va = a.get(i);
-            double vb = b.get(i);
-            dot += va * vb;
-            normA += va * va;
-            normB += vb * vb;
-        }
-        if (normA == 0 || normB == 0) {
-            return 0.0;
-        }
-        return dot / (Math.sqrt(normA) * Math.sqrt(normB));
     }
 
     private double keywordSimilarity(String textA, String textB) {
